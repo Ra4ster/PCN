@@ -27,12 +27,16 @@ int main(void)
 
     for (int r = 0; r < RUNS; r++) {
         auto start = std::chrono::high_resolution_clock::now();
-        for (int i = 0; i < ITERS; i++)
+        for (int i = 0; i < ITERS; i++) {
             pc.RunPrediction(x.get());
+        }
         pc.Flush();
         auto end = std::chrono::high_resolution_clock::now();
         times[r] = std::chrono::duration<double, std::milli>(end - start).count();
     }
+    #ifdef _DEBUG
+    pc.DebugStats();
+    #endif
 
     double sum = 0;
     double minT = times[0], maxT = times[0];

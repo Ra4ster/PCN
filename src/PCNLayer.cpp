@@ -21,19 +21,19 @@ uint64_t base_seed = 12345; // <- Consider changing
  * - err is inSize
  */
 
-PCLayer::PCLayer(size_t inSize, size_t outSize, float lr, float ir, int stepSize)
-    : inputSize(inSize), outputSize(outSize), lr(lr), ir(ir), stepSize(stepSize)
+PCLayer::PCLayer(size_t inSize, size_t outSize, float lr, float ir, int stepSize, ActivationFn act)
+    : inputSize(inSize), outputSize(outSize), lr(lr), ir(ir), stepSize(stepSize), activation(act)
 {
     B = GetBatchSize();
     #ifdef _DEBUG
     std::cout << "[Deepity] Initialized layer with batch size " << B << std::endl;
     #endif
     zBegin   = outSize * inSize;
-    pBegin   = zBegin + B * outputSize;   // Z is [B × outSize]
-    errBegin = pBegin + B * inputSize;    // P is [B × inSize]
+    pBegin   = zBegin + B * outputSize; 
+    errBegin = pBegin + B * inputSize;
     totalSize = errBegin + B * inputSize;
 
-    this->arr = std::make_unique<float[]>(totalSize);
+    this->arr = new (std::align_val_t{64}) float[totalSize];
     this->inputBuffer = std::make_unique<float[]>(B * inputSize);
 
 #pragma omp parallel
@@ -43,9 +43,20 @@ PCLayer::PCLayer(size_t inSize, size_t outSize, float lr, float ir, int stepSize
 
 #pragma omp for
         for (size_t i = 0; i < pBegin; i++) {
-            arr.get()[i] = rng.rand<float>() * 0.02f - 0.01f;
+            arr[i] = rng.rand<float>() * 0.02f - 0.01f;
         }
     }
+    std::cout << (reinterpret_cast<uintptr_t>(arr) % 64) << '\n';
+    std::cout
+    << "B=" << B
+    << " in=" << inputSize
+    << " out=" << outputSize
+    << " step=" << stepSize
+    << '\n';
+}
+
+PCLayer::~PCLayer() {
+    ::operator delete[](arr, std::align_val_t{64});
 }
 
 void PCLayer::CalcPrediction() noexcept
@@ -56,33 +67,35 @@ cblas_sgemm(
     inputSize,  // N = output cols
     outputSize, // K = inner dim
     1.0f,
-    arr.get() + zBegin, outputSize,   // Z is [B × outSize]
-    arr.get(), outputSize,   // W is [inSize × outSize], transposed
+    arr + zBegin, outputSize,   // Z is [B × outSize]
+    arr, outputSize,   // W is [inSize × outSize], transposed
     0.0f,
-    arr.get() + pBegin, inputSize);
+    arr + pBegin, inputSize);
 }
 
 void PCLayer::CalcStepError(const float *x) noexcept
 {
     assert(x != nullptr && "Cannot calculate error if x is null!");
-    cblas_scopy(B * inputSize, x, 1, arr.get() + errBegin, 1); // E = X
+    cblas_scopy(B * inputSize, x, 1, arr + errBegin, 1); // E = X
     cblas_saxpy(B * inputSize, -1.0f,
-        arr.get() + pBegin, 1,
-        arr.get() + errBegin, 1); 
+        arr + pBegin, 1,
+        arr + errBegin, 1); 
 }
 
 void PCLayer::UpdateBeliefs() noexcept
 {
-    cblas_sgemm(
+    cblas_sgemm( // z += ir * err * W
         CblasRowMajor, CblasNoTrans, CblasNoTrans,
         B,          // M = batch size
         outputSize, // N
         inputSize,  // K
         ir,
-        arr.get() + errBegin, inputSize,    // E is [B × inSize]
-        arr.get(), outputSize,   // W is [inSize × outSize]
+        arr + errBegin, inputSize,    // E is [B × inSize]
+        arr, outputSize,   // W is [inSize × outSize]
         1.0f,
-        arr.get() + zBegin, outputSize); 
+        arr + zBegin, outputSize);
+
+        activation(arr + zBegin, B * outputSize); // z = f(z)
 }
 
 void PCLayer::RunBatchedPrediction(const float *x) noexcept
@@ -126,8 +139,51 @@ void PCLayer::UpdateWeights(const float *x) noexcept
     outputSize, // N
     B,          // K = batch size
     lr,
-    arr.get() + errBegin, inputSize,
-    arr.get() + zBegin, outputSize,
+    arr + errBegin, inputSize,
+    arr + zBegin, outputSize,
     1.0f,
-    arr.get(), outputSize);
+    arr, outputSize);
 }
+
+#ifdef _DEBUG
+void PCLayer::DebugStats() const
+{
+    auto print_region = [&](const char* name,
+                            size_t begin,
+                            size_t end)
+    {
+        size_t nan_count = 0;
+        size_t inf_count = 0;
+        float max_abs = 0.0f;
+        double checksum = 0.0;
+
+        for (size_t i = begin; i < end; ++i)
+        {
+            const float v = arr[i];
+
+            if (std::isnan(v))
+                nan_count++;
+
+            if (std::isinf(v))
+                inf_count++;
+
+            max_abs = std::max(max_abs, std::abs(v));
+            checksum += v;
+        }
+
+        std::cout
+            << name
+            << ": size=" << (end - begin)
+            << " nan=" << nan_count
+            << " inf=" << inf_count
+            << " max_abs=" << max_abs
+            << " checksum=" << checksum
+            << '\n';
+    };
+
+    print_region("W",   0,        zBegin);
+    print_region("Z",   zBegin,   pBegin);
+    print_region("P",   pBegin,   errBegin);
+    print_region("Err", errBegin, totalSize);
+}
+#endif

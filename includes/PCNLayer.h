@@ -1,6 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <memory>
+#include <Activations.h>
 
 /**
  * @file PCNLayer.h
@@ -22,13 +23,17 @@
  * @author Jack Rose
  */
 
+using ActivationFn = void(*)(float*, size_t);
+
 namespace Deep
 {
     class PCLayer
     {
     public:
-        PCLayer(size_t inSize, size_t outSize, float lr = 1e-6, float ir = 1e-6, int stepSize = 30); // default
-        ~PCLayer() = default; // destructor
+        PCLayer(size_t inSize, size_t outSize, float lr = 1e-6, float ir = 1e-6, int stepSize = 30, ActivationFn act = relu); // default
+        PCLayer(const PCLayer&) = delete;
+        PCLayer& operator=(const PCLayer&) = delete;
+        ~PCLayer(); // destructor
 
         /// @brief Calculates prediction and returns it.
         /// @return prediction
@@ -50,15 +55,19 @@ namespace Deep
         void UpdateWeights(const float *x) noexcept;
 
         // @internal GETTERS
-        float *GetPrediction() const noexcept { return arr.get() + pBegin; }
-        float *GetInferenceError() const noexcept { return arr.get() + errBegin; }
-        float *GetBeliefs() const noexcept { return arr.get() + zBegin; }
-        float *GetWeights() const noexcept { return arr.get(); }
+        float *GetPrediction() const noexcept { return arr + pBegin; }
+        float *GetInferenceError() const noexcept { return arr + errBegin; }
+        float *GetBeliefs() const noexcept { return arr + zBegin; }
+        float *GetWeights() const noexcept { return arr; }
         float GetLR() const noexcept { return lr; }
         float GetIR() const noexcept { return ir; }
         size_t GetInputSize() const noexcept { return inputSize; }
         size_t GetOutputSize() const noexcept { return outputSize; }
         size_t GetBatchSize() const noexcept { return B; }
+
+        #ifdef _DEBUG
+        void DebugStats() const;
+        #endif
 
     private:
 
@@ -74,9 +83,10 @@ namespace Deep
         float lr = 0.0f; // learning rate
         float ir = 0.0f; // inference rate
         int stepSize = -1; // Inference steps (TODO: May become optimized!!)
+        ActivationFn activation;
 
         // @internal MEMBERS
-        std::unique_ptr<float[]> arr; // Weights
+        float *arr; // Weights
         // @internal the following are used to reduce cache misses:
         size_t zBegin;
         size_t pBegin;
