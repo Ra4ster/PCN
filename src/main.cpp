@@ -1,12 +1,11 @@
 #include <iostream>
 #include <chrono>
 #include "PCNLayer.h"
-#include <cblas.h>
 #include <random>
 
 int main(void)
 {
-    Deep::PCLayer pc(1000, 100);
+    Deep::PCLayer pc(1000, 100); // uses stepSize=30, f() = relu, and ir=lr=1e-6 by default
     
     // Random inputs instead of identical sequential values
     std::mt19937 rng(42);
