@@ -49,10 +49,9 @@ namespace Deep
         void RunPrediction(const float *x) noexcept;
         /// @brief Runs remaining predictions.
         void Flush() noexcept;
-        /// @brief Updates weights using the learning rule `W += lr * e * x^T`
+        /// @brief Updates weights using the learning rule `W += lr * e * z^T`
         /// @attention This assumes error has already been calculated
-        /// @param x Inputs to learn
-        void UpdateWeights(const float *x) noexcept;
+        void UpdateWeights() noexcept;
 
         // @internal GETTERS
         float *GetPrediction() const noexcept { return arr + pBegin; }

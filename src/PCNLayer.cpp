@@ -28,10 +28,19 @@ PCLayer::PCLayer(size_t inSize, size_t outSize, float lr, float ir, int stepSize
     #ifdef _DEBUG
     std::cout << "[Deepity] Initialized layer with batch size " << B << std::endl;
     #endif
-    zBegin   = outSize * inSize;
-    pBegin   = zBegin + B * outputSize; 
-    errBegin = pBegin + B * inputSize;
-    totalSize = errBegin + B * inputSize;
+    auto align_elements = [](size_t count) {
+        return (count + 15) & ~size_t(15);
+    };
+
+    size_t wSizeAligned   = align_elements(outSize * inSize);
+    size_t zSizeAligned   = align_elements(B * outputSize);
+    size_t pSizeAligned   = align_elements(B * inputSize);
+    size_t errSizeAligned = align_elements(B * inputSize);
+    // Compute pointers using the aligned step sizes
+    zBegin    = wSizeAligned;
+    pBegin    = zBegin + zSizeAligned; 
+    errBegin  = pBegin + pSizeAligned;
+    totalSize = errBegin + errSizeAligned;
 
     this->arr = new (std::align_val_t{64}) float[totalSize];
     this->inputBuffer = std::make_unique<float[]>(B * inputSize);
@@ -61,7 +70,7 @@ PCLayer::~PCLayer() {
 
 void PCLayer::CalcPrediction() noexcept
 {
-cblas_sgemm(
+cblas_sgemm( // p = z * W^T
     CblasRowMajor, CblasNoTrans, CblasTrans,
     B,          // M = batch size
     inputSize,  // N = output cols
@@ -77,7 +86,7 @@ void PCLayer::CalcStepError(const float *x) noexcept
 {
     assert(x != nullptr && "Cannot calculate error if x is null!");
     cblas_scopy(B * inputSize, x, 1, arr + errBegin, 1); // E = X
-    cblas_saxpy(B * inputSize, -1.0f,
+    cblas_saxpy(B * inputSize, -1.0f, // E -= p
         arr + pBegin, 1,
         arr + errBegin, 1); 
 }
@@ -106,7 +115,7 @@ void PCLayer::RunBatchedPrediction(const float *x) noexcept
         CalcStepError(x);
         UpdateBeliefs();
     }
-    UpdateWeights(x);
+    UpdateWeights();
 }
 
 void PCLayer::RunPrediction(const float *x) noexcept
@@ -129,10 +138,8 @@ void PCLayer::Flush() noexcept
     }
 }
 
-void PCLayer::UpdateWeights(const float *x) noexcept
+void PCLayer::UpdateWeights() noexcept
 {
-    (void)x; // Suppress unused for now
-
     cblas_sgemm(
     CblasRowMajor, CblasTrans, CblasNoTrans,
     inputSize,  // M
