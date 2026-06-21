@@ -2,6 +2,24 @@
 #include <cstddef>
 #include <immintrin.h>
 
+/**
+ * @file Activations.h
+ * @brief Defines the activation functions of a predictive coding model.
+ * 
+ * This header includes implementations of ReLU and TanH.
+ * 
+ * Usage:
+ *  #include <Activations.h>
+ * 
+ * Example:
+ *  Deep::tanh(array, arraysize)
+ * 
+ * @note Separate implementations exist for AVX512F, AVX2, SSE, and naive.
+ * @version 1.0
+ * @date 2026-06-21
+ * @author Jack Rose
+ */
+
 #ifndef MAX
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
 #endif

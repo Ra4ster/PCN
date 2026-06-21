@@ -61,6 +61,10 @@ namespace Deep
         /// @param ptr Starting address for the buffer
         void Attach(float *ptr) noexcept;
 
+        /// @brief Runs prediction all `stepSize` times, including error calculation and belief updating. Updates weights at the end as well.
+        /// @param x Input
+        void RunBatchedPrediction(const float *x) noexcept;
+
         // @internal GETTERS
         float *GetPrediction() const noexcept { return arr + pBegin; }
         float *GetInferenceError() const noexcept { return arr + errBegin; }
@@ -78,8 +82,6 @@ namespace Deep
         #endif
 
     private:
-
-        void RunBatchedPrediction(const float *x) noexcept;
 
         // @internal SIZES
         size_t inputSize = 0;

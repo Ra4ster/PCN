@@ -7,13 +7,14 @@
 
 using namespace Deep;
 
-PCNetwork::~PCNetwork() 
+PCNetwork::~PCNetwork()
+{
+    if (masterArena != nullptr)
     {
-        if (masterArena != nullptr) {
-            ::operator delete[](masterArena, std::align_val_t{64});
-            masterArena = nullptr;
-        }
+        ::operator delete[](masterArena, std::align_val_t{64});
+        masterArena = nullptr;
     }
+}
 
 void PCNetwork::Compile() noexcept
 {
@@ -22,8 +23,9 @@ void PCNetwork::Compile() noexcept
     {
         arenaSize += layer.GetTotalSize();
     }
-
+    
     masterArena = new (std::align_val_t{64}) float[arenaSize];
+    std::fill(masterArena, masterArena + arenaSize, 0.0f);
 
     size_t currentOffset = 0;
     for (auto &layer : layers)
@@ -38,49 +40,62 @@ void PCNetwork::Compile() noexcept
 #endif
 }
 
-void PCNetwork::TrainStep(float *x, float *target) 
+void PCNetwork::InferenceStep(float *x)
 {
-    (void)target; // TODO
-
-    if (layers.empty()) return;
+    if (layers.empty())
+        return;
 
     // Feed the input directly to the bottom layer
-    if (x != nullptr) {
+    if (x != nullptr)
+    {
         layers.front().RunPrediction(x);
     }
-    
-    // TODO: eventually want a PCLayer::SetTarget(float* t) 
-    // method that directly maps to the 'err' or 'p' boundaries of the top layer
 
     // Track the batch to cascade data upwards
-    pendingCount++;
-    
-    if (pendingCount == layers.front().GetBatchSize()) {
-        // Cascade the beliefs (Z) upwards layer by layer.
-        for (size_t l = 0; l < layers.size() - 1; ++l) {
-            
-            if (l + 1 >= layers.size()) break; 
+    pendingInferenceCount++;
+    size_t B = layers.front().GetBatchSize();
 
-            float* z_out = layers[l].GetBeliefs();
-            size_t out_dim = layers[l].GetOutputSize();
-            size_t B = layers[l].GetBatchSize();
-            
-            for (size_t b = 0; b < B; ++b) {
-                layers[l + 1].RunPrediction(z_out + (b * out_dim));
-            }
+    if (pendingInferenceCount == B)
+    {
+        // Cascade the beliefs (Z) upwards layer by layer.
+        for (size_t l = 0; l < layers.size() - 1; ++l)
+        {
+            float *z_out = layers[l].GetBeliefs();
+
+            layers[l + 1].RunBatchedPrediction(z_out);
         }
-        pendingCount = 0; // Reset for the next batch
+        pendingInferenceCount = 0; // Reset for the next batch
     }
 }
 
-void PCNetwork::RunPrediction(float *x, float *target)
+void PCNetwork::GenerationStep(float *target)
 {
-    TrainStep(x, target);
+    if (layers.empty())
+        return;
+
+    if (target != nullptr)
+        layers.back().RunPrediction(target);
+
+    pendingGenerationCount++;
+    size_t B = layers.back().GetBatchSize();
+
+    if (pendingGenerationCount == B)
+    {
+        for (int l = static_cast<int>(layers.size()) - 2; l >= 0; --l)
+        {
+            float *z_out = layers[l + 1].GetBeliefs();
+            size_t out_dim = layers[l + 1].GetOutputSize();
+
+            for (size_t b = 0; b < B; ++b)
+                layers[l].RunPrediction(z_out + (b * out_dim));
+        }
+        pendingGenerationCount = 0;
+    }
 }
 
-void PCNetwork::Flush()
+void PCNetwork::FlushInference()
 {
-    if (layers.empty() || pendingCount == 0)
+    if (layers.empty() || pendingInferenceCount == 0)
         return;
 
     layers.front().Flush();
@@ -91,7 +106,7 @@ void PCNetwork::Flush()
         float *z_out = layers[l].GetBeliefs();
         size_t out_dim = layers[l].GetOutputSize();
 
-        for (size_t b = 0; b < pendingCount; ++b)
+        for (size_t b = 0; b < pendingInferenceCount; ++b)
         {
             layers[l + 1].RunPrediction(z_out + (b * out_dim));
         }
@@ -99,11 +114,43 @@ void PCNetwork::Flush()
         layers[l + 1].Flush();
     }
 
-    pendingCount = 0;
+    pendingInferenceCount = 0;
+}
+
+void PCNetwork::FlushGeneration()
+{
+    if (layers.empty() || pendingGenerationCount == 0)
+        return;
+
+    layers.back().Flush();
+
+    // Cascade the partial batch downwards
+    for (int l = static_cast<int>(layers.size()) - 2; l >= 0; --l)
+    {
+        float *z_out = layers[l + 1].GetBeliefs();
+        size_t out_dim = layers[l + 1].GetOutputSize();
+
+        for (size_t b = 0; b < pendingGenerationCount; ++b)
+        {
+            layers[l].RunPrediction(z_out + (b * out_dim));
+        }
+        // Flush the next layer immediately after feeding it the partial batch
+        layers[l].Flush();
+    }
+
+    pendingGenerationCount = 0;
 }
 
 float PCNetwork::GetTotalEnergy() const noexcept
 {
+#ifdef _DEBUG
+    if (pendingInferenceCount > 0 || pendingGenerationCount > 0)
+        std::cout << "[Deepity] WARNING: GetTotalEnergy() called with unflushed batch ("
+                  << pendingInferenceCount << " inference, "
+                  << pendingGenerationCount << " generation pending). "
+                  << "Energy may be stale or zero.\n";
+#endif
+
     float totalEnergy = 0.0f;
 
     for (const auto &layer : layers)

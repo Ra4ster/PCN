@@ -7,6 +7,24 @@
 #include <windows.h>
 #endif
 
+/**
+ * @file Optimize.h
+ * @brief Defines useful optimization functions of a PC model.
+ * 
+ * This header currently only includes implementation of an L2 Cache size lookup.
+ * 
+ * Usage:
+ *  #include <Optimize.h>
+ * 
+ * Example:
+ *  size_t sizeofL2 = GetL2CacheBytes();
+ * 
+ * @note Separate versions exist for Windows VS. Linux.
+ * @version 1.0
+ * @date 2026-06-21
+ * @author Jack Rose
+ */
+
 inline size_t GetL2CacheBytes() {
 #ifdef __linux__
     std::ifstream f("/sys/devices/system/cpu/cpu0/cache/index2/size");
