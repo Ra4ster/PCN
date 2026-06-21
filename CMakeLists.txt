@@ -36,7 +36,7 @@ if(MSVC)
     )
 else()
     target_compile_options(Deepity PRIVATE
-        $<$<CONFIG:Release>:-O3 -march=native>
+        $<$<CONFIG:Release>:-O3 -march=x86-64-v3>
         $<$<CONFIG:RelWithDebInfo>:-O3 -g -march=native>
         $<$<CONFIG:Debug>:-O0 -g3 -Wall -Wextra -Wpedantic>
         $<$<CONFIG:Debug>:-fsanitize=address,undefined>
